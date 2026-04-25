@@ -1,3 +1,5 @@
+import { identityClient } from '../grpc/client';
+
 // We define a TypeScript interface for our GraphQL context
 // This context is passed to every resolver and usually holds the user's JWT data
 interface GraphQLContext {
@@ -43,6 +45,28 @@ export const resolvers = {
         isCached: false,
       };
     },
+
+    // 👉 NEW: The actual bridge to the Microservice!
+    verifyAccess: async (_parent: any, args: { userId: string, role: string }) => {
+        console.log(`[BFF] UI requested access check. Forwarding to gRPC...`);
+        
+        // Node.js gRPC uses old-school callbacks. 
+        // We wrap it in a modern Promise so our GraphQL server can properly `await` the network response.
+        return new Promise((resolve, reject) => {
+          identityClient.ValidateUserAccess(
+            { userId: args.userId, requiredRole: args.role }, 
+            (error: any, response: any) => {
+              if (error) {
+                console.error("[BFF] gRPC Network Error:", error);
+                reject(error);
+              } else {
+                console.log("[BFF] Received response from Microservice:", response);
+                resolve(response);
+              }
+            }
+          );
+        });
+      }
   },
 
   // The 'Mutation' object handles all data modifications (The 'Write' side of CQRS)
@@ -72,4 +96,4 @@ export const resolvers = {
       };
     },
   },
-};
+};``

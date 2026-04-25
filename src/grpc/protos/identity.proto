@@ -1,0 +1,16 @@
+syntax = "proto3";
+package identity;
+
+service IdentityService {
+  rpc ValidateUserAccess (AccessRequest) returns (AccessResponse);
+}
+
+message AccessRequest {
+  string userId = 1;
+  string requiredRole = 2;
+}
+
+message AccessResponse {
+  bool isAuthorized = 1;
+  string message = 2;
+}

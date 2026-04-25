@@ -33,6 +33,19 @@ export const typeDefs = `#graphql
     isCached: Boolean!
   }
 
+
+  type AICacheResponse {
+    answer: String!
+    sources: [String!]!
+    isCached: Boolean!
+  }
+
+  # 👉 NEW: The exact shape of the data returning from our gRPC microservice
+  type AccessResponse {
+    isAuthorized: Boolean!
+    message: String!
+  }
+
   # ---------------------------------------------------------
   # QUERIES (Synchronous Reads - Fetching Data)
   # ---------------------------------------------------------
@@ -41,7 +54,12 @@ export const typeDefs = `#graphql
     getDocumentStatus(documentId: ID!): Document
 
     # Sends a question to the AI Copilot. It requires a documentId for context and the question string.
-    askCopilot(documentId: ID!, question: String!): CopilotResponse!
+    # askCopilot(documentId: ID!, question: String!): CopilotResponse!
+    askCopilot(documentId: ID!, question: String!): AICacheResponse
+
+    # 👉 NEW: The UI will call this to check permissions
+    verifyAccess(userId: String!, role: String!): AccessResponse
+    
   }
 
   # ---------------------------------------------------------
