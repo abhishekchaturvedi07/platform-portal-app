@@ -1,4 +1,9 @@
 import { identityClient } from '../grpc/client';
+//  NEW: Import Node.js File System and Path modules for our Storage Layer
+import fs from "fs/promises";
+import path from "path";
+//  NEW: Import Node's native cryptography library for deduplication
+import crypto from "crypto";
 
 // We define a TypeScript interface for our GraphQL context
 // This context is passed to every resolver and usually holds the user's JWT data
@@ -73,30 +78,65 @@ export const resolvers = {
 
   // The 'Mutation' object handles all data modifications (The 'Write' side of CQRS)
   Mutation: {
-    // Resolver for 'uploadDocument', triggering the Event-Driven async flow
+    // Resolver for 'uploadDocument', handling secure storage and deduplication
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     uploadDocument: async (_parent: any, args: { filename: string; contentBase64: string }) => {
-      // 1. Generate a unique ID for the new document transaction
-      const newDocumentId = `doc_${Date.now()}`;
+      try {
+        // 1. Define our "S3 Bucket" local path (an 'uploads' folder in the root directory).
+        // GOLDEN RULE: Never pass data to an AI engine without securely storing the raw artifact first.
+        const uploadDir = path.join(process.cwd(), "uploads");
 
-      // 2. We make a fast, synchronous call to the Data Ingestion Service to save the initial record (PostgreSQL/Mongo)
-      // await db.documents.insert({ id: newDocumentId, status: 'PENDING' });
+        // 2. Ensure the directory actually exists on the hard drive (if not, create it dynamically)
+        await fs.mkdir(uploadDir, { recursive: true });
 
-      // 3. CRITICAL ENTERPRISE PATTERN: We drop an event onto the Kafka/RabbitMQ broker
-      // The AI FastAPI service will listen for this event and process the vector embeddings in the background
-      // await kafka.publish('document.uploaded', { documentId: newDocumentId, content: args.contentBase64 });
+        // 3. Decode the incoming Base64 string back into a raw binary buffer
+        const fileBuffer = Buffer.from(args.contentBase64, "base64");
 
-      // 4. We immediately return a '202 Accepted' style response to the UI so it doesn't hang waiting for the AI
-      return {
-        // The newly generated ID so the UI can start polling for status updates
-        id: newDocumentId,
-        // The filename provided by the UI
-        filename: args.filename,
-        // The initial state, proving to the UI that the async pipeline has started
-        status: "PENDING",
-        // The exact time of the transaction
-        uploadedAt: new Date().toISOString(),
-      };
+        // 4. CRYPTOGRAPHIC HASHING: Generate a SHA-256 fingerprint of the binary data
+        // This ensures if a user uploads the exact same file twice, we catch it.
+        const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+        
+        // 5. We use the first 16 characters of the hash as our universally unique Document ID
+        const documentId = `doc_${fileHash.substring(0, 16)}`;
+        
+        // 6. ENTERPRISE SECURITY: We save the file using its hash as the name to guarantee absolute uniqueness
+        const filePath = path.join(uploadDir, `${documentId}.pdf`);
+
+        // 7. THE DEDUPLICATION CHECK: Does this exact file already exist on our hard drive?
+        try {
+          await fs.access(filePath); // This checks if the file exists
+          
+          console.log(`♻️ [DEDUPLICATION] Exact file already exists! Skipping AI processing for: ${documentId}`);
+          
+          // Return immediately. Do not write the file, do not trigger the AI.
+          return {
+            id: documentId,
+            filename: args.filename, // Return their original filename to avoid confusing the user
+            status: "ALREADY_PROCESSED", // Tell the UI it was an instant cache hit
+            uploadedAt: new Date().toISOString(),
+          };
+        } catch {
+          // If fs.access throws an error, it means the file DOES NOT exist. We are clear to save it.
+          console.log(`🆕 [STORAGE LAYER] New file detected. Saving securely to: ${filePath}`);
+          
+          // 8. Write the physical file to the hard drive
+          await fs.writeFile(filePath, fileBuffer);
+
+          // 9. CRITICAL ENTERPRISE PATTERN: We would drop an event onto the Kafka/RabbitMQ broker here.
+          // The Python FastAPI service will listen for this event and process the vector embeddings in the background.
+          // await kafka.publish('document.uploaded', { documentId: documentId, path: filePath });
+
+          return {
+            id: documentId,
+            filename: args.filename,
+            status: "STORED_SECURELY", 
+            uploadedAt: new Date().toISOString(),
+          };
+        }
+      } catch (error) {
+        console.error("❌ [STORAGE ERROR]:", error);
+        throw new Error("Failed to store the document in the secure layer.");
+      }
     },
   },
 };

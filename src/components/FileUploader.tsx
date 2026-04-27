@@ -3,7 +3,9 @@
 import { useState, useRef } from "react";
 import { gql } from "@apollo/client";
 import { useMutation } from "@apollo/client/react";
+
 // 1. THE GRAPHQL CONTRACT
+// This mutation defines exactly what data we are sending to the BFF and what we expect back.
 const UPLOAD_DOCUMENT = gql`
   mutation UploadDocument($filename: String!, $contentBase64: String!) {
     uploadDocument(filename: $filename, contentBase64: $contentBase64) {
@@ -16,12 +18,14 @@ const UPLOAD_DOCUMENT = gql`
 `;
 
 export function FileUploader() {
+  // --- UI STATE MANAGEMENT ---
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Apollo Hook for the Network Call
-  const [uploadDocument, { data, loading, error }] = useMutation<{
+  // --- NETWORK STATE MANAGEMENT ---
+  // Apollo Hook for the Network Call. We destructure 'reset' to clear the cache for subsequent uploads.
+  const [uploadDocument, { data, loading, error, reset }] = useMutation<{
     uploadDocument: {
       id: string;
       filename: string;
@@ -41,27 +45,37 @@ export function FileUploader() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setFile(e.dataTransfer.files[0]);
+
+    // Safely extract the physical file from the drop event array using [0]
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile) {
+      setFile(droppedFile);
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+    // Safely extract the physical file from the input selection array using [0]
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      setFile(selectedFile);
     }
   };
 
-  // --- FILE PROCESSING LOGIC ---
+  // --- FILE PROCESSING & NETWORK LOGIC ---
   const handleUpload = async () => {
     if (!file) return;
 
-    // Convert file to Base64 to send over GraphQL
+    // 1. Convert the physical File object into a Base64 string.
+    // GraphQL requires text/string payloads, so we cannot send raw binary blobs directly.
     const reader = new FileReader();
+
     reader.onloadend = async () => {
-      const base64String = reader.result?.toString().split(",")[1]; // Strip the data URL prefix
+      // 2. The FileReader returns a "Data URL" (e.g., "data:application/pdf;base64,JVBERi0...").
+      // We split on the comma and take the second half [1] to isolate the pure Base64 data.
+      const base64String = reader.result?.toString().split(",")[1];
 
       if (base64String) {
+        // 3. Fire the GraphQL Mutation to our Next.js BFF Gateway
         await uploadDocument({
           variables: {
             filename: file.name,
@@ -70,12 +84,19 @@ export function FileUploader() {
         });
       }
     };
+
+    // Trigger the file reading process
     reader.readAsDataURL(file);
   };
 
+  // Resets the component so the user can upload a new file
   const resetUploader = () => {
-    setFile(null);
+    setFile(null); // Clear the local React state
+    reset(); // Clear the Apollo Client cache to hide the success/duplicate screen
   };
+
+  // Helper variable to check if the backend caught a duplicate file using Cryptographic Hashing
+  const isDuplicate = data?.uploadDocument?.status === "ALREADY_PROCESSED";
 
   // --- UI RENDER ---
   return (
@@ -87,26 +108,38 @@ export function FileUploader() {
         AI Document Ingestion
       </h2>
 
-      {/* Success State */}
+      {/* Network Response State (Success or Duplicate) */}
       {data && data.uploadDocument ? (
-        <div className="bg-green-500/10 border border-green-500/20 p-6 rounded-lg text-center">
-          <div className="text-green-400 text-4xl mb-4">✅</div>
+        <div
+          className={`p-6 rounded-lg text-center border ${isDuplicate ? "bg-yellow-500/10 border-yellow-500/20" : "bg-green-500/10 border-green-500/20"}`}
+        >
+          {/* Dynamic Icon & Title based on Status */}
+          <div className="text-4xl mb-4">{isDuplicate ? "⚠️" : "✅"}</div>
           <h3 className="text-lg font-medium text-white mb-2">
-            Upload Successful
+            {isDuplicate ? "Document Already Exists" : "Upload Successful"}
           </h3>
+
           <p className="text-slate-400 text-sm mb-4">
             Document ID:{" "}
             <span className="font-mono text-slate-300">
               {data.uploadDocument.id}
             </span>
           </p>
+
           <div className="flex items-center justify-center gap-2 text-sm text-slate-400 mb-6">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+            {!isDuplicate && (
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+              </span>
+            )}
+            <span>
+              {isDuplicate
+                ? "Skipped AI processing to save compute costs."
+                : "Sent to AI Orchestrator Queue."}
             </span>
-            Sent to AI Orchestrator Queue
           </div>
+
           <button
             onClick={resetUploader}
             className="text-blue-400 hover:text-blue-300 text-sm font-medium transition-colors"
@@ -115,7 +148,7 @@ export function FileUploader() {
           </button>
         </div>
       ) : (
-        /* Upload State */
+        /* Upload State (Ready to receive files) */
         <>
           <div
             onDragOver={handleDragOver}
@@ -127,6 +160,9 @@ export function FileUploader() {
               ${file ? "border-green-500/50 bg-green-500/5" : ""}
             `}
           >
+            {/* CRITICAL: Ensure onChange points to handleFileSelect.
+              Do not bind it directly to setFile, as it expects a physical File object, not a React Event!
+            */}
             <input
               type="file"
               ref={fileInputRef}
