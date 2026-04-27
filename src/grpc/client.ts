@@ -9,6 +9,7 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   keepCase: true, longs: String, enums: String, defaults: true, oneofs: true,
 });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition) as any;
 const identityProto = protoDescriptor.identity;
 

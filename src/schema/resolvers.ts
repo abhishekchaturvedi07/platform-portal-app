@@ -2,17 +2,17 @@ import { identityClient } from '../grpc/client';
 
 // We define a TypeScript interface for our GraphQL context
 // This context is passed to every resolver and usually holds the user's JWT data
-interface GraphQLContext {
-  // The decoded user ID from the API Gateway's JWT validation
-  userId: string;
-}
+// interface GraphQLContext {
+//   userId: string;
+// }
 
 // We define the shape of our resolvers to ensure strict TypeScript compilation
 export const resolvers = {
   // The 'Query' object handles all data fetching operations (The 'Read' side of CQRS)
   Query: {
     // Resolver for 'getDocumentStatus', extracting 'documentId' from the arguments
-    getDocumentStatus: async (_parent: any, args: { documentId: string }, context: GraphQLContext) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    getDocumentStatus: async (_parent: any, args: { documentId: string }) => {
       // 1. In a real app, we would make a gRPC or REST call to the Data Ingestion Service here
       // For now, we return a mock object to satisfy the TypeScript contract
       return {
@@ -28,7 +28,8 @@ export const resolvers = {
     },
 
     // Resolver for 'askCopilot', demonstrating the Redis caching strategy
-    askCopilot: async (_parent: any, args: { documentId: string; question: string }, context: GraphQLContext) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    askCopilot: async (_parent: any, args: { documentId: string; question: string }) => {
       // 1. We would first check our Redis cache to see if this exact question was asked before
       // const cachedAnswer = await redis.get(args.question);
       
@@ -46,7 +47,7 @@ export const resolvers = {
       };
     },
 
-    // 👉 NEW: The actual bridge to the Microservice!
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     verifyAccess: async (_parent: any, args: { userId: string, role: string }) => {
         console.log(`[BFF] UI requested access check. Forwarding to gRPC...`);
         
@@ -55,6 +56,7 @@ export const resolvers = {
         return new Promise((resolve, reject) => {
           identityClient.ValidateUserAccess(
             { userId: args.userId, requiredRole: args.role }, 
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (error: any, response: any) => {
               if (error) {
                 console.error("[BFF] gRPC Network Error:", error);
@@ -72,7 +74,8 @@ export const resolvers = {
   // The 'Mutation' object handles all data modifications (The 'Write' side of CQRS)
   Mutation: {
     // Resolver for 'uploadDocument', triggering the Event-Driven async flow
-    uploadDocument: async (_parent: any, args: { filename: string; contentBase64: string }, context: GraphQLContext) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    uploadDocument: async (_parent: any, args: { filename: string; contentBase64: string }) => {
       // 1. Generate a unique ID for the new document transaction
       const newDocumentId = `doc_${Date.now()}`;
 
@@ -96,4 +99,4 @@ export const resolvers = {
       };
     },
   },
-};``
+};
