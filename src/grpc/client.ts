@@ -15,6 +15,6 @@ const identityProto = protoDescriptor.identity;
 
 // Create the Client that points directly to your running microservice!
 export const identityClient = new identityProto.IdentityService(
-  'localhost:50051', // The exact port your backend is running on
+  'identity-service:50051', // The exact port your backend is running on
   grpc.credentials.createInsecure()
 );

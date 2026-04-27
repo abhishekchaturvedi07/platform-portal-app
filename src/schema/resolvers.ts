@@ -18,7 +18,7 @@ import crypto from "crypto";
  * We initialize the Redis client to connect to our local Homebrew-managed instance.
  * Using a cache prevents redundant, expensive LLM calls for identical questions.
  */
-const redisClient = createClient({ url: 'redis://127.0.0.1:6379' });
+const redisClient = createClient({ url: 'redis://redis-cache:6379' });
 redisClient.on('error', (err) => console.error('❌ [REDIS] Client Error', err));
 redisClient.connect().then(() => console.log("⚡ [BFF] Connected to Redis Cache Layer"));
 // ----------------------------
