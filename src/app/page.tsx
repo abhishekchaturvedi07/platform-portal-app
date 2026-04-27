@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { gql } from "@apollo/client";
 import { useLazyQuery } from "@apollo/client/react";
-// 👉 NEW: Import the uploader
+
 import { FileUploader } from "@/components/FileUploader";
+
+import { CopilotChat } from "@/components/CopilotChat";
 
 const VERIFY_ACCESS_QUERY = gql`
   query VerifyAccess($userId: String!, $role: String!) {
@@ -114,8 +116,11 @@ export default function Dashboard() {
         )}
       </section>
 
-      {/* 👉 NEW: FILE UPLOADER SECTION */}
+      {/* FILE UPLOADER SECTION */}
       <FileUploader />
+
+      {/* Chat Section */}
+      <CopilotChat />
     </main>
   );
 }
