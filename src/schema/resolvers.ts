@@ -1,5 +1,6 @@
 import { identityClient } from '../grpc/client';
-// Native Node.js modules for file handling and cryptography
+// 👉 NEW: Import Redis client for high-performance caching
+import { createClient } from 'redis';
 import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
@@ -11,6 +12,16 @@ import crypto from "crypto";
  * - Queries: Read-only operations that fetch data.
  * - Mutations: Write operations that modify state and trigger microservice events.
  */
+
+// --- REDIS INITIALIZATION ---
+/**
+ * We initialize the Redis client to connect to our local Homebrew-managed instance.
+ * Using a cache prevents redundant, expensive LLM calls for identical questions.
+ */
+const redisClient = createClient({ url: 'redis://127.0.0.1:6379' });
+redisClient.on('error', (err) => console.error('❌ [REDIS] Client Error', err));
+redisClient.connect().then(() => console.log("⚡ [BFF] Connected to Redis Cache Layer"));
+// ----------------------------
 
 export const resolvers = {
   // --- QUERY SECTION (The 'Read' side) ---
@@ -47,15 +58,33 @@ export const resolvers = {
     },
 
     /**
-     * askCopilot:
+     * askCopilot (Modified with Cache-Aside Pattern):
      * This is the bridge between the React Chat UI and the Python LLM Engine.
-     * It handles the network hop to port 8000 where our AI Orchestrator lives.
+     * Before hitting the Python engine, we check Redis for a pre-existing answer.
      */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     askCopilot: async (_parent: any, args: { documentId: string; question: string }) => {
       console.log(`💬 [BFF] User is asking: "${args.question}" for doc: ${args.documentId}`);
 
+      // 1. GENERATE UNIQUE CACHE KEY
+      // We normalize the question to lowercase and hash it to create a unique ID for this specific Q&A pair.
+      const questionHash = crypto.createHash('md5').update(args.question.toLowerCase().trim()).digest('hex');
+      const cacheKey = `ai_cache:${args.documentId}:${questionHash}`;
+
       try {
+        // 2. THE CACHE CHECK (The "Fast Path")
+        const cachedAnswer = await redisClient.get(cacheKey);
+        if (cachedAnswer) {
+          console.log("🚀 [CACHE HIT] Returning stored answer from Redis memory.");
+          return {
+            ...JSON.parse(cachedAnswer),
+            isCached: true // Tells the UI this was a lightning-fast cached response
+          };
+        }
+
+        console.log("🐢 [CACHE MISS] No stored answer found. Requesting fresh inference...");
+
+        // 3. THE LLM REQUEST (The "Slow Path")
         // We use 127.0.0.1 to avoid IPv6 resolution issues in Node.js 18+
         const response = await fetch('http://127.0.0.1:8000/ask-copilot', {
           method: 'POST',
@@ -71,13 +100,20 @@ export const resolvers = {
         }
 
         const data = await response.json();
-
-        // Return the RAG-generated answer and source metadata to the React frontend
-        return {
+        
+        const finalResponse = {
           answer: data.answer,
           sources: data.sources,
-          isCached: false, // Future implementation: Add Redis caching layer here
+          isCached: false,
         };
+
+        // 4. SAVE TO CACHE
+        // We store the result for 1 hour (3600 seconds) so future identical questions are instant.
+        await redisClient.set(cacheKey, JSON.stringify(finalResponse), {
+          EX: 3600 
+        });
+
+        return finalResponse;
 
       } catch (error) {
         console.error("❌ [BFF CHAT ERROR]:", error);
