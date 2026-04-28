@@ -1,10 +1,10 @@
 import { identityClient } from '../grpc/client';
-// 👉 NEW: Import Redis client for high-performance caching
 import { createClient } from 'redis';
 import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 
+import { publishEvent } from '../utils/rabbitmq';
 /**
  * ARCHITECTURAL NOTE:
  * This file serves as our "BFF" (Backend-for-Frontend) Gateway.
@@ -18,7 +18,9 @@ import crypto from "crypto";
  * We initialize the Redis client to connect to our local Homebrew-managed instance.
  * Using a cache prevents redundant, expensive LLM calls for identical questions.
  */
-const redisClient = createClient({ url: 'redis://redis-cache:6379' });
+// [UPDATE]: We use the Docker environment variable or fallback to the Docker service name
+const REDIS_URL = process.env.REDIS_URL || 'redis://redis-cache:6379';
+const redisClient = createClient({ url: REDIS_URL });
 redisClient.on('error', (err) => console.error('❌ [REDIS] Client Error', err));
 redisClient.connect().then(() => console.log("⚡ [BFF] Connected to Redis Cache Layer"));
 // ----------------------------
@@ -85,8 +87,21 @@ export const resolvers = {
         console.log("🐢 [CACHE MISS] No stored answer found. Requesting fresh inference...");
 
         // 3. THE LLM REQUEST (The "Slow Path")
-        // We use 127.0.0.1 to avoid IPv6 resolution issues in Node.js 18+
+        // [LEGACY CODE - PHASE 1]: We used 127.0.0.1 when everything ran on the Mac host
+        /*
         const response = await fetch('http://127.0.0.1:8000/ask-copilot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            document_id: args.documentId,
+            question: args.question
+          })
+        });
+        */
+
+        // [ENTERPRISE CODE - PHASE 2]: Use Docker internal DNS via Environment Variable
+        const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://ai-engine:8000';
+        const response = await fetch(`${AI_ENGINE_URL}/ask-copilot`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -159,7 +174,7 @@ export const resolvers = {
      * 1. Decode Base64 binary
      * 2. Hash file for deduplication (SHA-256)
      * 3. Persist to local "S3-style" Storage Layer
-     * 4. Trigger Python AI Orchestrator asynchronously
+     * 4. Trigger Python AI Orchestrator asynchronously via Event Mesh
      */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     uploadDocument: async (_parent: any, args: { filename: string; contentBase64: string }) => {
@@ -195,12 +210,12 @@ export const resolvers = {
 
           /**
            * 6. THE MICROSERVICE BRIDGE (React -> Node.js -> Python)
-           * We notify the Python AI Orchestrator to start chunking and embedding.
-           * Note: We don't 'await' the fetch here because we want to return a 
-           * success response to the UI immediately while the AI works in the background.
+           * * [LEGACY CODE - DEPRECATED IN PHASE 8]
+           * Previously, we used a synchronous REST call. This was a "Fire and Forget" 
+           * that risked dropping messages if the Python AI was offline or busy.
            */
+          /*
           console.log(`🚀 [BFF] Notifying Python AI Engine to process: ${documentId}`);
-          
           fetch('http://127.0.0.1:8000/process-document', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -218,12 +233,31 @@ export const resolvers = {
           }).catch((networkError) => {
             console.error("❌ [BFF] Could not reach Python. Check if FastAPI is on port 8000.", networkError);
           });
+          */
 
-          // 7. Return initial success status to the React UI
+          /**
+           * [ENTERPRISE PATTERN - EVENT DRIVEN BACKBONE]
+           * We now publish to RabbitMQ. The BFF guarantees the message is saved to the broker.
+           * The Python Worker will consume this queue autonomously.
+           */
+          console.log(`⚡ [EVENT MESH] Publishing ingestion event for ${documentId} to RabbitMQ...`);
+          
+          const ingestionEvent = {
+            eventId: crypto.randomUUID(),
+            document_id: documentId, // using snake_case to easily map to Python Pydantic models
+            filename: args.filename,
+            file_path: filePath,
+            timestamp: new Date().toISOString()
+          };
+
+          // Publish the event to the queue
+          await publishEvent('document_ingestion_queue', ingestionEvent);
+
+          // 7. Return initial success status to the React UI instantly
           return {
             id: documentId,
             filename: args.filename,
-            status: "PROCESSING_AI", 
+            status: "QUEUED_FOR_AI", // Updated status to reflect event-driven nature
             uploadedAt: new Date().toISOString(),
           };
         }
