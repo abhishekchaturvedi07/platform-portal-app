@@ -5,6 +5,7 @@ import path from "path";
 import crypto from "crypto";
 
 import { publishEvent } from '../utils/rabbitmq';
+
 /**
  * ARCHITECTURAL NOTE:
  * This file serves as our "BFF" (Backend-for-Frontend) Gateway.
@@ -60,13 +61,21 @@ export const resolvers = {
     },
 
     /**
-     * askCopilot (Modified with Cache-Aside Pattern):
+     * askCopilot (Modified with Cache-Aside Pattern & Layer 0 Security):
      * This is the bridge between the React Chat UI and the Python LLM Engine.
      * Before hitting the Python engine, we check Redis for a pre-existing answer.
+     * [UPDATE - PHASE 12]: We now forward the user's JWT identity token to the 
+     * AI Engine to enforce row-level document security.
      */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    askCopilot: async (_parent: any, args: { documentId: string; question: string }) => {
+    askCopilot: async (_parent: any, args: { documentId: string; question: string }, context: any) => {
       console.log(`💬 [BFF] User is asking: "${args.question}" for doc: ${args.documentId}`);
+
+      // 🛡️ Debug Log
+      console.log(`🔑 [DEBUG] Token received in resolver: ${context.token ? 'YES (Present)' : 'NO (Empty)'}`);
+      
+      // 🛡️ [SECURITY]: Grab identity token from the GraphQL context[cite: 3, 6]
+      const token = context.token;
 
       // 1. GENERATE UNIQUE CACHE KEY
       // We normalize the question to lowercase and hash it to create a unique ID for this specific Q&A pair.
@@ -103,7 +112,10 @@ export const resolvers = {
         const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://ai-engine:8000';
         const response = await fetch(`${AI_ENGINE_URL}/ask-copilot`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}` // 👉 [NEW]: Injecting JWT for Layer 0 Security[cite: 3]
+          },
           body: JSON.stringify({
             document_id: args.documentId,
             question: args.question
@@ -133,7 +145,7 @@ export const resolvers = {
       } catch (error) {
         console.error("❌ [BFF CHAT ERROR]:", error);
         return {
-          answer: "I'm sorry, I'm having trouble connecting to my brain right now. Please ensure the Python service is running.",
+          answer: "I'm sorry, I'm having trouble connecting to my brain right now. Please ensure the Python service is running and you are logged in.",
           sources: [],
           isCached: false
         };
@@ -211,8 +223,7 @@ export const resolvers = {
           /**
            * 6. THE MICROSERVICE BRIDGE (React -> Node.js -> Python)
            * * [LEGACY CODE - DEPRECATED IN PHASE 8]
-           * Previously, we used a synchronous REST call. This was a "Fire and Forget" 
-           * that risked dropping messages if the Python AI was offline or busy.
+           * Previously, we used a synchronous REST call.
            */
           /*
           console.log(`🚀 [BFF] Notifying Python AI Engine to process: ${documentId}`);
@@ -224,15 +235,7 @@ export const resolvers = {
               filename: args.filename,
               file_path: filePath
             })
-          }).then(async (aiResponse) => {
-            if (!aiResponse.ok) {
-              console.error("⚠️ [BFF] Python Engine returned an error:", await aiResponse.text());
-            } else {
-              console.log("✅ [BFF] Python Engine started processing successfully.");
-            }
-          }).catch((networkError) => {
-            console.error("❌ [BFF] Could not reach Python. Check if FastAPI is on port 8000.", networkError);
-          });
+          }).then(async (aiResponse) => { ... }).catch((networkError) => { ... });
           */
 
           /**
@@ -244,7 +247,7 @@ export const resolvers = {
           
           const ingestionEvent = {
             eventId: crypto.randomUUID(),
-            document_id: documentId, // using snake_case to easily map to Python Pydantic models
+            document_id: documentId, 
             filename: args.filename,
             file_path: filePath,
             timestamp: new Date().toISOString()

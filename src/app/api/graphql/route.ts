@@ -19,9 +19,21 @@ const server = new ApolloServer({
 
 // Create the handler
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
+
 const handler = startServerAndCreateNextHandler<NextRequest>(server as any, {
-  context: async () => {
-    return { userId: "mock-enterprise-user-id" };
+  context: async (req: NextRequest) => {
+    const authHeader = req.headers.get('authorization') || '';
+    
+    // 🛡️ Robust extraction: handles both "Bearer <token>" and just "<token>"
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+
+    console.log(`🛡️ [BFF GATEWAY] Identity Extracted: ${token ? 'SUCCESS' : 'MISSING'}`);
+
+    return { 
+      token, 
+      userId: "enterprise-user" 
+    };
   },
 });
 
