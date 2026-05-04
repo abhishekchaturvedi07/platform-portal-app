@@ -4,6 +4,18 @@ This repository houses the frontend UI and the Backend-For-Frontend (BFF) API la
 
 > **Architectural Source of Truth:** > This application is a deployable micro-frontend. For the full system blueprints, capabilities catalog, and macro-architecture diagrams, please refer to the central [Engineering Platform Repository](https://github.com/abhishekchaturvedi07/engineering-platform).
 
+ai-orchestrator/
+├── .claude/ <-- AI Context Folder
+├── agent_graph/
+│ ├── agent.py <-- Supervisor & Graph Definition
+│ └── nodes.py <-- Graph Nodes
+├── services/
+│ └── queue_producer.py <-- RabbitMQ Producer
+├── workers/
+│ └── notification_worker.py <-- Background Consumer
+├── main.py <-- FastAPI Entry Point
+└── .env <-- Contains JWT_SECRET & RABBITMQ_URL
+
 ---
 
 ## 🏗️ Tech Stack
