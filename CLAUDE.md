@@ -1,6 +1,6 @@
-# BFF Gateway Project Rules
+# Platform Portal: Project Brain
 
-- **Tech Stack**: Next.js (App Router), Apollo GraphQL, Tailwind CSS.
-- **Security**: All outbound requests to `ai-orchestrator` MUST include the `Authorization: Bearer <token>` header extracted from `localStorage`.
-- **UI Logic**: Sensitive AI components (Ingestion/Chat) must be conditionally rendered based on the presence of `accessToken`.
-- **Naming Convention**: Use PascalCase for Components and camelCase for hooks/utilities.
+- **Role**: Next.js BFF (Backend-for-Frontend) and User UI.
+- **Security**: Extracts `accessToken` from `localStorage` and passes it in the `Authorization` header.
+- **UI Logic**: Features are gated. No token = No AI Ingestion/Chat components.
+- **Core Stack**: Next.js (App Router), Apollo GraphQL, Tailwind.
